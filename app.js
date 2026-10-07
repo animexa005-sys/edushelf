@@ -2,13 +2,15 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.7.0/firebas
 
 import {
   getAuth,
-  onAuthStateChanged,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
   updateProfile,
-  sendEmailVerification
-} from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
+  sendEmailVerification,
+  onAuthStateChanged,
+  GoogleAuthProvider,
+  signInWithPopup
+} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 
 import {
   getFirestore,
@@ -61,6 +63,7 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const app = initializeApp(firebaseConfig);
 
 const auth = getAuth(app);
+const googleProvider = new GoogleAuthProvider();
 const db = getFirestore(app);
 
 let currentUser = null;
@@ -285,11 +288,56 @@ function authScreen() {
 
 
           <button
-            class="btn primary block"
-            id="authBtn"
-            type="submit"
+  class="btn primary block"
+  id="authBtn"
+  type="submit"
+>
+  Log in
+</button>
+
+<div
+  style="
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin:16px 0;
+    color:#888;
+    font-size:13px;
+  "
+>
+  <div style="flex:1;border-top:1px solid #ddd;"></div>
+  OR
+  <div style="flex:1;border-top:1px solid #ddd;"></div>
+</div>
+
+<button
+  class="btn block"
+  id="googleBtn"
+  type="button"
+>
+  Continue with Google
+</button>
+                    <div
+            style="
+              display:flex;
+              align-items:center;
+              gap:10px;
+              margin:16px 0;
+              color:#888;
+              font-size:13px;
+            "
           >
-            Log in
+            <div style="flex:1;border-top:1px solid #ddd;"></div>
+            OR
+            <div style="flex:1;border-top:1px solid #ddd;"></div>
+          </div>
+
+          <button
+            class="btn block"
+            id="googleBtn"
+            type="button"
+          >
+            Continue with Google
           </button>
 
         </form>
@@ -318,7 +366,10 @@ function authScreen() {
 
   let signup = false;
 
+$('googleBtn').onclick =
+  googleLogin;
 
+  
   /* =====================================================
      SWITCH LOGIN / SIGNUP
      ===================================================== */
@@ -597,7 +648,208 @@ function authScreen() {
   };
 }
 
+/* =========================================================
+   GOOGLE LOGIN
+   ========================================================= */
 
+async function googleLogin() {
+
+  const btn = $('googleBtn');
+
+  if (!btn) return;
+
+  btn.dataset.originalText =
+    btn.textContent;
+
+  setBusy(
+    btn,
+    true,
+    'Connecting to Google…'
+  );
+
+  try {
+
+    const result =
+      await signInWithPopup(
+        auth,
+        googleProvider
+      );
+
+    const user =
+      result.user;
+
+
+    /*
+     Google accounts are already
+     authenticated by Google.
+     Firebase normally marks them
+     as emailVerified = true.
+    */
+
+
+    const existingProfile =
+      await getProfile(user.uid);
+
+
+    /* -----------------------------------------------
+       CREATE PROFILE FOR NEW GOOGLE USER
+       ----------------------------------------------- */
+
+    if (!existingProfile) {
+
+      /*
+       Create a safe username.
+
+       Google display names can contain:
+       spaces, symbols, etc.
+
+       Therefore we sanitize the name
+       and add part of the UID so that
+       usernames are much less likely to collide.
+      */
+
+      let baseUsername =
+        (
+          user.displayName ||
+          'student'
+        )
+          .toLowerCase()
+          .replace(/[^a-z0-9_]/g, '')
+          .slice(0, 22);
+
+      if (
+        baseUsername.length < 3
+      ) {
+        baseUsername =
+          'student';
+      }
+
+      const googleUsername =
+        `${baseUsername}_${user.uid.slice(0, 6)}`;
+
+
+      await setDoc(
+        doc(
+          db,
+          'users',
+          user.uid
+        ),
+        {
+
+          uid:
+            user.uid,
+
+          displayName:
+            user.displayName ||
+            'Student',
+
+          username:
+            googleUsername,
+
+          email:
+            user.email,
+
+          photoUrl:
+            user.photoURL ||
+            '',
+
+          bio:
+            '',
+
+          createdAt:
+            serverTimestamp(),
+
+          updatedAt:
+            serverTimestamp()
+        }
+      );
+
+
+    } else {
+
+      /* ---------------------------------------------
+         UPDATE EXISTING GOOGLE PROFILE
+         --------------------------------------------- */
+
+      await updateDoc(
+        doc(
+          db,
+          'users',
+          user.uid
+        ),
+        {
+
+          email:
+            user.email,
+
+          photoUrl:
+            user.photoURL ||
+            existingProfile.photoUrl ||
+            '',
+
+          updatedAt:
+            serverTimestamp()
+        }
+      );
+    }
+
+
+    toast(
+      'Google login successful.'
+    );
+
+
+  } catch (e) {
+
+    console.error(
+      'Google sign-in error:',
+      e
+    );
+
+
+    if (
+      e?.code ===
+      'auth/popup-closed-by-user'
+    ) {
+
+      toast(
+        'Google sign-in was cancelled.'
+      );
+
+    } else if (
+      e?.code ===
+      'auth/popup-blocked'
+    ) {
+
+      toast(
+        'Google popup was blocked. Please allow popups for EduShelf.'
+      );
+
+    } else if (
+      e?.code ===
+      'auth/account-exists-with-different-credential'
+    ) {
+
+      toast(
+        'An account already exists with this email using another sign-in method.'
+      );
+
+    } else {
+
+      toast(
+        friendlyError(e)
+      );
+    }
+
+
+  } finally {
+
+    setBusy(
+      btn,
+      false
+    );
+  }
+}
 /* =========================================================
    MAIN LAYOUT
    ========================================================= */
